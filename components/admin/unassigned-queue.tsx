@@ -1,67 +1,74 @@
 "use client";
 
 import { useState } from "react";
-import { InboxIcon, SparklesIcon } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { InboxIcon } from "lucide-react";
 import { toast } from "sonner";
+import type { SealedLiveQuery } from "@neon/realtime/client";
 import { naira, timeAgo } from "@/lib/format";
-import { getRep, type Customer } from "@/lib/mock-data";
+import { assignAdvisor } from "@/lib/actions";
 import { Button } from "@/components/ui/button";
 import { EmptyState, UserAvatar } from "@/components/shared/ui-bits";
-import { AssignDialog } from "./assign-dialog";
+import { useLive } from "@/components/realtime/realtime-root";
+import { LiveDot } from "@/components/customer/live-status";
+import { AssignDialog, type RepOption } from "./assign-dialog";
 
-const NEW_SIGNUPS: Omit<Customer, "signedUp" | "lastActivity">[] = [
-  { id: "c-2001", name: "Yetunde Alabi", email: "yetunde@example.com", phone: "", city: "Abeokuta", address: "", propertyType: "Home", stage: "new", repId: null, systemKva: 3.5, estimateKobo: 418_000_000 },
-  { id: "c-2002", name: "Segun Martins", email: "segun@example.com", phone: "", city: "Lagos", address: "", propertyType: "Office", stage: "new", repId: null, systemKva: 7.5, estimateKobo: 1_100_000_000 },
-];
+export type QueueRow = {
+  user_id: string;
+  name: string;
+  email: string;
+  city: string | null;
+  property_type: string | null;
+  created_at: Date | string;
+  system_kva: string | null;
+  estimate_kobo: string | null;
+};
 
-export function UnassignedQueue({ initial }: { initial: Customer[] }) {
-  const [rows, setRows] = useState(initial);
-  const [assigning, setAssigning] = useState<Customer | null>(null);
-  const [demoIdx, setDemoIdx] = useState(0);
+/** Customers waiting for an advisor. Live: new sign-ups appear, assigned ones drop out, without a refresh. */
+export function UnassignedQueue({
+  userId,
+  sealedQuery,
+  initialData,
+  reps,
+}: {
+  userId: string;
+  sealedQuery: SealedLiveQuery<QueueRow>;
+  initialData: QueueRow[];
+  reps: RepOption[];
+}) {
+  const router = useRouter();
+  const { rows: liveRows, status } = useLive("admin-queue", userId, sealedQuery, initialData);
+  const [hidden, setHidden] = useState<Set<string>>(new Set()); // optimistic: hide while the change syncs
+  const [assigning, setAssigning] = useState<QueueRow | null>(null);
+  const rows = liveRows.filter((r) => !hidden.has(r.user_id));
 
   return (
     <div className="rounded-2xl border bg-card">
       <div className="flex items-center gap-3 border-b px-5 py-4">
         <p className="font-semibold">Waiting for an advisor</p>
         <span className="rounded-full bg-gold-gradient px-2 text-xs font-bold text-black tabular-nums">{rows.length}</span>
-        <span className="ml-auto inline-flex items-center gap-1.5 text-xs text-muted-foreground">
-          <span className="relative flex size-2">
-            <span className="absolute inline-flex size-full animate-ping rounded-full bg-emerald-400 opacity-60" />
-            <span className="relative inline-flex size-2 rounded-full bg-emerald-500" />
-          </span>
-          Live
+        <span className="ml-auto">
+          <LiveDot status={status} />
         </span>
-        {demoIdx < NEW_SIGNUPS.length && (
-          <Button
-            variant="ghost"
-            size="xs"
-            onClick={() => {
-              const n = { ...NEW_SIGNUPS[demoIdx], signedUp: new Date(), lastActivity: new Date() };
-              setRows((r) => [n, ...r]);
-              setDemoIdx((i) => i + 1);
-              toast(`New sign-up: ${n.name}`, { description: "Appeared live in your queue." });
-            }}
-          >
-            <SparklesIcon /> Simulate sign-up
-          </Button>
-        )}
       </div>
       {rows.length === 0 ? (
         <EmptyState icon={InboxIcon} title="All caught up" description="Every customer has an advisor. New sign-ups appear here instantly." className="m-4 border-0" />
       ) : (
         <ul className="divide-y">
           {rows.map((c) => (
-            <li key={c.id} className="flex flex-col gap-3 px-5 py-4 animate-in fade-in slide-in-from-top-1 sm:flex-row sm:items-center">
+            <li key={c.user_id} className="flex animate-in flex-col gap-3 px-5 py-4 fade-in slide-in-from-top-1 sm:flex-row sm:items-center">
               <div className="flex min-w-0 flex-1 items-center gap-3">
                 <UserAvatar name={c.name} />
                 <div className="min-w-0">
                   <p className="truncate font-medium">{c.name}</p>
-                  <p className="text-xs text-muted-foreground">
-                    {c.propertyType} · {c.city} · {c.systemKva} kVA · {naira(c.estimateKobo)}
+                  <p className="truncate text-xs text-muted-foreground">
+                    {[c.property_type, c.city, c.system_kva ? `${c.system_kva} kVA` : null, c.estimate_kobo ? naira(Number(c.estimate_kobo)) : null].filter(Boolean).join(" · ") || c.email}
                   </p>
                 </div>
               </div>
-              <span className="text-xs text-muted-foreground">Signed up {timeAgo(c.signedUp)}</span>
+              <span className="text-xs text-muted-foreground" suppressHydrationWarning>
+                Signed up {timeAgo(new Date(c.created_at))}
+              </span>
               <Button size="sm" className="bg-gold-gradient text-black hover:brightness-110" onClick={() => setAssigning(c)}>
                 Assign advisor
               </Button>
@@ -74,10 +81,17 @@ export function UnassignedQueue({ initial }: { initial: Customer[] }) {
           open
           onOpenChange={(o) => !o && setAssigning(null)}
           customerName={assigning.name}
-          onAssign={(repId) => {
-            setRows((r) => r.filter((x) => x.id !== assigning.id));
-            toast.success(`${assigning.name} → ${getRep(repId)?.name}`, { description: "Introduction emails sent and their chat is open." });
+          reps={reps}
+          onAssign={async (repId) => {
+            const res = await assignAdvisor({ customerId: assigning.user_id, repId });
+            if (!res.ok) {
+              toast.error(res.error);
+              return;
+            }
+            setHidden((h) => new Set(h).add(assigning.user_id));
+            toast.success(`${assigning.name} → ${reps.find((r) => r.id === repId)?.name}`, { description: "Their dashboard updated live." });
             setAssigning(null);
+            router.refresh(); // refreshes the stats and pipeline around the queue
           }}
         />
       )}

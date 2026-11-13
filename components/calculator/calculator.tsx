@@ -28,6 +28,7 @@ import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, Command
 import { AnimatedNumber } from "@/components/shared/animated-number";
 import { goldButton, eyebrow } from "@/components/shared/styles";
 import { LoadCategories } from "./load-categories";
+import { PENDING_CALC_KEY } from "@/components/customer/pending-calc-saver";
 
 let nextId = 0;
 const newId = () => `line-${++nextId}`;
@@ -74,6 +75,13 @@ export function Calculator({
   };
 
   const categories = [...new Set(appliances.map((a) => a.category))];
+
+  // Kept in the browser until sign-up; the dashboard then saves it to the new account.
+  const rememberDraft = () => {
+    try {
+      localStorage.setItem(PENDING_CALC_KEY, JSON.stringify({ lines, backupHours }));
+    } catch {}
+  };
 
   return (
     <section id="calculator" className="scroll-mt-20 py-20 sm:py-28">
@@ -278,14 +286,18 @@ export function Calculator({
             </dl>
 
             <Button asChild className={cn(goldButton, "mt-6 h-11 w-full text-base")} disabled={result.empty}>
-              <Link href="/auth/sign-up?from=calculator">
+              <Link href="/auth/sign-up?from=calculator" onClick={rememberDraft}>
                 Talk to an expert <ArrowRightIcon />
               </Link>
             </Button>
             <Button
               variant="outline"
               className="mt-2 h-10 w-full"
-              onClick={() => toast.success("Estimate saved", { description: "Create an account to keep it and share it with an expert." })}
+              disabled={result.empty}
+              onClick={() => {
+                rememberDraft();
+                toast.success("Estimate kept on this device", { description: "Create a free account to save it and share it with an expert." });
+              }}
             >
               Save this estimate
             </Button>
@@ -305,7 +317,7 @@ export function Calculator({
             <p className="font-display text-lg font-bold text-gold-text tabular-nums">{naira(result.cost.total)}</p>
           </div>
           <Button asChild className={cn(goldButton, "h-10")}>
-            <Link href="/auth/sign-up?from=calculator">
+            <Link href="/auth/sign-up?from=calculator" onClick={rememberDraft}>
               Talk to an expert <ArrowRightIcon />
             </Link>
           </Button>

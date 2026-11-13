@@ -1,79 +1,55 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeftIcon, Building2Icon, CalendarDaysIcon, MailIcon, MapPinIcon, MessageSquareIcon, PhoneIcon, VideoIcon } from "lucide-react";
+import { ArrowLeftIcon, Building2Icon, CalculatorIcon, MailIcon, MapPinIcon, MessageSquareIcon, PhoneIcon, VideoIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { StageBadge } from "@/components/shared/stage";
 import { EmptyState, UserAvatar } from "@/components/shared/ui-bits";
+import { PreviewNotice } from "@/components/shared/preview-notice";
 import { SystemSummary } from "@/components/shared/system-summary";
 import { StartCallButton } from "@/components/call/start-call-button";
 import { StageControl } from "@/components/rep/stage-control";
 import { QuoteBuilder } from "@/components/quotes/quote-builder";
 import { MediaManager } from "@/components/media/media-manager";
-import { formatDate, formatDateTime } from "@/lib/format";
-import { STAGES, stageIndex } from "@/lib/stages";
-import {
-  bookings,
-  demoCalculation,
-  demoStageEvents,
-  DEMO_CUSTOMER_ID,
-  getCustomer,
-  getRep,
-  loadPresets,
-  media,
-  quotes,
-  type Customer,
-  type LoadPreset,
-} from "@/lib/mock-data";
+import { formatDate } from "@/lib/format";
+import { canAccessCustomer, requireViewer } from "@/lib/auth/viewer";
+import { getCustomerRecord, toCustomer } from "@/lib/data";
+import type { Rep } from "@/lib/mock-data";
 
 export const metadata: Metadata = { title: "Customer" };
 
-const presetFor: Record<Customer["propertyType"], LoadPreset> = {
-  Home: "residential",
-  Office: "business",
-  Shop: "business",
-  Warehouse: "industrial",
-  School: "specialized",
-};
-
 export default async function RepCustomerPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const c = getCustomer(id);
-  if (!c) notFound();
-  const rep = getRep(c.repId);
-  const isDemo = c.id === DEMO_CUSTOMER_ID;
-  const calc = isDemo
-    ? demoCalculation
-    : { lines: loadPresets[presetFor[c.propertyType]].lines, backupHours: loadPresets[presetFor[c.propertyType]].backupHours, createdAt: c.signedUp };
-  const events = isDemo
-    ? demoStageEvents
-    : STAGES.slice(0, stageIndex(c.stage) + 1).map((s, i) => ({ stage: s.id, at: new Date(c.signedUp.getTime() + i * 2 * 86_400_000), by: i === 0 ? c.name : rep?.name ?? "Admin" }));
-  const quote = quotes.find((q) => q.customerId === c.id);
-  const calls = bookings.filter((b) => b.customerId === c.id).sort((a, b) => b.startsAt.getTime() - a.startsAt.getTime());
-  const siteMedia = isDemo ? media.filter((m) => m.kind === "site") : [];
-  const progressMedia = isDemo ? media.filter((m) => m.kind === "progress") : [];
+  const viewer = await requireViewer(["rep", "admin"], `/rep/customers/${id}`);
+  const record = await getCustomerRecord(decodeURIComponent(id));
+  // Not found and not yours look the same, so record ids can't be probed.
+  if (!record || !canAccessCustomer(viewer, record.profile)) notFound();
+  const { profile: p, rep, calc, events } = record;
+  const customer = toCustomer(p, calc);
+  const repForQuote: Rep | null = rep
+    ? { id: rep.user_id, name: rep.name, email: rep.email, phone: rep.phone ?? "", title: rep.title ?? "Solar Advisor", status: "active", online: false, joined: rep.created_at }
+    : null;
 
   return (
     <div className="mx-auto max-w-7xl space-y-6">
       <Button asChild variant="ghost" size="sm" className="-ml-2">
-        <Link href="/rep">
-          <ArrowLeftIcon /> My customers
+        <Link href={viewer.profile.role === "admin" ? "/admin/customers" : "/rep"}>
+          <ArrowLeftIcon /> {viewer.profile.role === "admin" ? "All customers" : "My customers"}
         </Link>
       </Button>
 
-      {/* header */}
       <div className="flex flex-col gap-5 rounded-2xl border bg-card p-5 sm:p-6 lg:flex-row lg:items-center">
         <div className="flex items-center gap-4">
-          <UserAvatar name={c.name} size="lg" className="size-14" gold />
+          <UserAvatar name={p.name} size="lg" className="size-14" gold />
           <div>
             <div className="flex flex-wrap items-center gap-2">
-              <h1 className="font-display text-2xl font-extrabold tracking-tight">{c.name}</h1>
-              <StageBadge stage={c.stage} />
+              <h1 className="font-display text-2xl font-extrabold tracking-tight">{p.name}</h1>
+              <StageBadge stage={p.stage} />
             </div>
             <p className="mt-1 text-sm text-muted-foreground">
-              Customer since {formatDate(c.signedUp)} · {rep ? `Advisor: ${rep.name}` : "No advisor yet"}
+              Customer since {formatDate(p.created_at)} · {rep ? `Advisor: ${rep.name}` : "No advisor yet"}
             </p>
           </div>
         </div>
@@ -83,7 +59,7 @@ export default async function RepCustomerPage({ params }: { params: Promise<{ id
               <MessageSquareIcon /> Message
             </Link>
           </Button>
-          <StartCallButton peer={c.name} />
+          <StartCallButton peer={p.name} />
         </div>
       </div>
 
@@ -101,19 +77,29 @@ export default async function RepCustomerPage({ params }: { params: Promise<{ id
               <Card>
                 <CardHeader>
                   <CardTitle>Project stage</CardTitle>
-                  <CardDescription>Advance the customer as work progresses. They see changes live.</CardDescription>
+                  <CardDescription>Advance the customer as work progresses. Their dashboard updates live.</CardDescription>
                 </CardHeader>
                 <CardContent>
-                  <StageControl initialStage={c.stage} events={events} repName={rep?.name ?? "Admin"} />
+                  <StageControl
+                    key={p.stage}
+                    customerId={p.user_id}
+                    initialStage={p.stage}
+                    events={events.map((e) => ({ stage: e.to_stage, at: e.created_at, by: e.changed_by ?? "System", note: e.note ?? undefined }))}
+                    repName={viewer.profile.name}
+                  />
                 </CardContent>
               </Card>
               <Card>
                 <CardHeader>
                   <CardTitle>Saved calculation</CardTitle>
-                  <CardDescription>From the load calculator on {formatDate(calc.createdAt)}</CardDescription>
+                  <CardDescription>{calc ? `From the load calculator on ${formatDate(calc.created_at)}` : "No calculation saved yet"}</CardDescription>
                 </CardHeader>
                 <CardContent>
-                  <SystemSummary lines={calc.lines} backupHours={calc.backupHours} />
+                  {calc ? (
+                    <SystemSummary lines={calc.lines} backupHours={calc.backup_hours} summary={calc.result} />
+                  ) : (
+                    <EmptyState icon={CalculatorIcon} title="No calculation yet" description="Ask the customer to use the load calculator, or build the quote from scratch." />
+                  )}
                 </CardContent>
               </Card>
             </div>
@@ -123,10 +109,10 @@ export default async function RepCustomerPage({ params }: { params: Promise<{ id
               </CardHeader>
               <CardContent className="space-y-3 text-sm">
                 {[
-                  { icon: MailIcon, v: c.email },
-                  { icon: PhoneIcon, v: c.phone },
-                  { icon: MapPinIcon, v: `${c.address}, ${c.city}` },
-                  { icon: Building2Icon, v: `${c.propertyType} · ${c.systemKva} kVA estimated` },
+                  { icon: MailIcon, v: p.email },
+                  { icon: PhoneIcon, v: p.phone || "No phone number" },
+                  { icon: MapPinIcon, v: [p.address, p.city].filter(Boolean).join(", ") || "No address yet" },
+                  { icon: Building2Icon, v: `${p.property_type ?? "Property type not set"}${calc?.result.inverterKva ? ` · ${calc.result.inverterKva} kVA estimated` : ""}` },
                 ].map((x) => (
                   <p key={x.v} className="flex items-start gap-2.5">
                     <x.icon className="mt-0.5 size-4 shrink-0 text-gold-text" />
@@ -138,51 +124,29 @@ export default async function RepCustomerPage({ params }: { params: Promise<{ id
           </div>
         </TabsContent>
 
-        <TabsContent value="quote">
-          {rep ? (
-            <QuoteBuilder existing={quote} customer={c} rep={rep} calculation={calc} />
+        <TabsContent value="quote" className="space-y-4">
+          <PreviewNotice>Quotes are saved and sent to customers in Phase 3, together with Paystack deposits. This builder works but isn&apos;t saved yet.</PreviewNotice>
+          {repForQuote && calc ? (
+            <QuoteBuilder customer={customer} rep={repForQuote} calculation={{ lines: calc.lines, backupHours: calc.backup_hours }} />
           ) : (
-            <EmptyState icon={CalendarDaysIcon} title="Assign an advisor first" description="Quotes are prepared by the customer's advisor." />
+            <EmptyState icon={CalculatorIcon} title={rep ? "No calculation yet" : "Assign an advisor first"} description="A quote starts from the customer's saved calculation and their advisor." />
           )}
         </TabsContent>
 
         <TabsContent value="media" className="space-y-10">
+          <PreviewNotice>Photo and video uploads connect to ImageKit in Phase 4.</PreviewNotice>
           <section>
             <h2 className="mb-3 font-display text-sm font-bold tracking-[0.12em] uppercase">Customer uploads</h2>
-            <MediaManager initial={siteMedia} uploaderId={rep?.id ?? "admin"} kind="site" title="" description="" canUpload={false} />
+            <MediaManager initial={[]} uploaderId={viewer.userId} kind="site" title="" description="" canUpload={false} />
           </section>
           <section>
             <h2 className="mb-3 font-display text-sm font-bold tracking-[0.12em] uppercase">Progress photos</h2>
-            <MediaManager
-              initial={progressMedia}
-              uploaderId={rep?.id ?? "admin"}
-              kind="progress"
-              title="Upload progress photos"
-              description="Share survey and installation photos with the customer. Pick the stage they belong to."
-            />
+            <MediaManager initial={[]} uploaderId={viewer.userId} kind="progress" title="Upload progress photos" description="Share survey and installation photos with the customer. Pick the stage they belong to." />
           </section>
         </TabsContent>
 
         <TabsContent value="calls">
-          {calls.length === 0 ? (
-            <EmptyState icon={VideoIcon} title="No calls yet" description="Calls booked by the customer will show here." />
-          ) : (
-            <ul className="divide-y rounded-2xl border bg-card">
-              {calls.map((b) => (
-                <li key={b.id} className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center">
-                  <span className="grid size-10 place-items-center rounded-xl bg-gold-soft text-gold-text">
-                    <VideoIcon className="size-4" />
-                  </span>
-                  <div className="flex-1">
-                    <p className="font-medium">{formatDateTime(b.startsAt)}</p>
-                    <p className="text-sm text-muted-foreground">{b.topic}</p>
-                  </div>
-                  <span className="text-xs text-muted-foreground capitalize">{b.status}</span>
-                  {b.status === "booked" && <StartCallButton peer={c.name} label="Start call" size="sm" />}
-                </li>
-              ))}
-            </ul>
-          )}
+          <EmptyState icon={VideoIcon} title="No calls yet" description="Calls this customer books will show here once booking is connected (Phase 4)." />
         </TabsContent>
       </Tabs>
     </div>

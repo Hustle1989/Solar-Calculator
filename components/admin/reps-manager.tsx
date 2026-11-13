@@ -5,7 +5,9 @@ import { MailIcon, MoreHorizontalIcon, UserPlusIcon } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { formatDate } from "@/lib/format";
-import { customers, type Rep } from "@/lib/mock-data";
+import type { Rep } from "@/lib/mock-data";
+import { setAccountActive } from "@/lib/actions";
+import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -22,8 +24,23 @@ const STATUS: Record<Rep["status"], string> = {
   deactivated: "text-muted-foreground",
 };
 
-export function RepsManager({ initial }: { initial: Rep[] }) {
-  const [rows, setRows] = useState(initial);
+type RepRow = Rep & { open?: number };
+
+export function RepsManager({ initial }: { initial: RepRow[] }) {
+  const router = useRouter();
+  const [rows, setRows] = useState<RepRow[]>(initial);
+  const [prevInitial, setPrevInitial] = useState(initial);
+  if (initial !== prevInitial) {
+    setPrevInitial(initial);
+    setRows(initial);
+  }
+  const setActive = async (r: RepRow, active: boolean) => {
+    const res = await setAccountActive({ userId: r.id, active });
+    if (!res.ok) return toast.error(res.error);
+    setRows((rs) => rs.map((x) => (x.id === r.id ? { ...x, status: active ? "active" : "deactivated" } : x)));
+    toast(active ? `${r.name} reactivated` : `${r.name} deactivated`, active ? undefined : { description: "Reassign their open customers from the Customers page." });
+    router.refresh();
+  };
   const [open, setOpen] = useState(false);
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
@@ -31,7 +48,7 @@ export function RepsManager({ initial }: { initial: Rep[] }) {
 
   const invite = () => {
     setRows((r) => [...r, { id: `r-${Date.now()}`, name: name.trim(), email: email.trim(), phone: "", title: "Solar Advisor", status: "invited", online: false, joined: new Date() }]);
-    toast.success("Invite sent", { description: `${email} has 7 days to accept.` });
+    toast.success("Invite added (preview)", { description: "Invite emails are sent once Resend is connected in Phase 2. For now, ask them to sign up and run `npm run db:set-role`." });
     setOpen(false);
     setEmail("");
     setName("");
@@ -72,9 +89,7 @@ export function RepsManager({ initial }: { initial: Rep[] }) {
                     {r.status === "invited" ? "Invite pending" : r.status}
                   </Badge>
                 </TableCell>
-                <TableCell className="hidden tabular-nums md:table-cell">
-                  {customers.filter((c) => c.repId === r.id && c.stage !== "completed").length}
-                </TableCell>
+                <TableCell className="hidden tabular-nums md:table-cell">{r.open ?? 0}</TableCell>
                 <TableCell className="hidden text-muted-foreground md:table-cell">{formatDate(r.joined)}</TableCell>
                 <TableCell className="pr-4">
                   <DropdownMenu>
@@ -92,15 +107,14 @@ export function RepsManager({ initial }: { initial: Rep[] }) {
                       {r.status !== "deactivated" ? (
                         <DropdownMenuItem
                           variant="destructive"
-                          onSelect={() => {
-                            setRows((rs) => rs.map((x) => (x.id === r.id ? { ...x, status: "deactivated" } : x)));
-                            toast(`${r.name} deactivated`, { description: "Reassign their open customers from the Customers page." });
-                          }}
+                          onSelect={() =>
+                            r.status === "invited" ? setRows((rs) => rs.filter((x) => x.id !== r.id)) : setActive(r, false)
+                          }
                         >
                           {r.status === "invited" ? "Revoke invite" : "Deactivate"}
                         </DropdownMenuItem>
                       ) : (
-                        <DropdownMenuItem onSelect={() => setRows((rs) => rs.map((x) => (x.id === r.id ? { ...x, status: "active" } : x)))}>Reactivate</DropdownMenuItem>
+                        <DropdownMenuItem onSelect={() => setActive(r, true)}>Reactivate</DropdownMenuItem>
                       )}
                     </DropdownMenuContent>
                   </DropdownMenu>

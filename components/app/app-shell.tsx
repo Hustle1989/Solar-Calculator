@@ -32,13 +32,12 @@ import {
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
-  DropdownMenuSub,
-  DropdownMenuSubContent,
-  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { UserAvatar } from "@/components/shared/ui-bits";
 import { CallProvider, useCall } from "@/components/call/call-provider";
+import { RealtimeRoot } from "@/components/realtime/realtime-root";
+import { authClient } from "@/lib/auth/client";
 
 type NavItem = { href: string; label: string; icon: LucideIcon; badge?: number };
 
@@ -83,17 +82,19 @@ export function AppShell({
   children: React.ReactNode;
 }) {
   return (
-    <CallProvider selfName={user.name}>
-      <div className="min-h-dvh lg:grid lg:grid-cols-[260px_minmax(0,1fr)]">
-        <aside className="dark sticky top-0 hidden h-dvh border-r border-sidebar-border bg-sidebar text-sidebar-foreground lg:flex lg:flex-col">
-          <SidebarContents role={role} user={user} />
-        </aside>
-        <div className="flex min-w-0 flex-col">
-          <TopBar role={role} user={user} notifications={notifications} callPeer={callPeer} />
-          <main className="flex-1 p-4 sm:p-6 lg:p-8">{children}</main>
+    <RealtimeRoot>
+      <CallProvider selfName={user.name}>
+        <div className="min-h-dvh lg:grid lg:grid-cols-[260px_minmax(0,1fr)]">
+          <aside className="dark sticky top-0 hidden h-dvh border-r border-sidebar-border bg-sidebar text-sidebar-foreground lg:flex lg:flex-col">
+            <SidebarContents role={role} user={user} />
+          </aside>
+          <div className="flex min-w-0 flex-col">
+            <TopBar role={role} user={user} notifications={notifications} callPeer={callPeer} />
+            <main className="flex-1 p-4 sm:p-6 lg:p-8">{children}</main>
+          </div>
         </div>
-      </div>
-    </CallProvider>
+      </CallProvider>
+    </RealtimeRoot>
   );
 }
 
@@ -189,6 +190,7 @@ function TopBar({ role, user, notifications, callPeer }: { role: Role; user: She
               Notifications {unread > 0 && <Badge className="bg-gold-soft text-gold-text">{unread} new</Badge>}
             </DropdownMenuLabel>
             <DropdownMenuSeparator />
+            {notifications.length === 0 && <p className="px-2 py-6 text-center text-sm text-muted-foreground">You&apos;re all caught up.</p>}
             {notifications.map((n) => (
               <DropdownMenuItem key={n.id} onSelect={() => router.push(n.href)} className="items-start gap-3 py-2.5">
                 <span className={cn("mt-1.5 size-2 shrink-0 rounded-full", n.unread ? "bg-gold" : "bg-transparent")} />
@@ -215,21 +217,17 @@ function TopBar({ role, user, notifications, callPeer }: { role: Role; user: She
             </DropdownMenuLabel>
             <DropdownMenuSeparator />
             <DropdownMenuGroup>
-              <DropdownMenuSub>
-                <DropdownMenuSubTrigger>View as (demo)</DropdownMenuSubTrigger>
-                <DropdownMenuSubContent>
-                  <DropdownMenuItem onSelect={() => router.push("/dashboard")}>Customer</DropdownMenuItem>
-                  <DropdownMenuItem onSelect={() => router.push("/dashboard?welcome=1")}>Customer: just signed up</DropdownMenuItem>
-                  <DropdownMenuItem onSelect={() => router.push("/rep")}>Solar advisor</DropdownMenuItem>
-                  <DropdownMenuItem onSelect={() => router.push("/admin")}>Admin</DropdownMenuItem>
-                </DropdownMenuSubContent>
-              </DropdownMenuSub>
               <DropdownMenuItem onSelect={() => simulateIncoming(callPeer)}>
-                <PhoneIncomingIcon /> Simulate incoming call
+                <PhoneIncomingIcon /> Simulate incoming call (demo)
               </DropdownMenuItem>
             </DropdownMenuGroup>
             <DropdownMenuSeparator />
-            <DropdownMenuItem onSelect={() => router.push("/")}>
+            <DropdownMenuItem
+              onSelect={async () => {
+                await authClient.signOut();
+                window.location.assign("/"); // full page load drops this user's live data
+              }}
+            >
               <LogOutIcon /> Sign out
             </DropdownMenuItem>
           </DropdownMenuContent>

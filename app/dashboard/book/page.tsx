@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { PageHeader } from "@/components/shared/ui-bits";
 import { BookingPicker } from "@/components/booking/booking-picker";
 import { DEMO_CUSTOMER_ID, getCustomer, getRep } from "@/lib/mock-data";
+import { PreviewNotice } from "@/components/shared/preview-notice";
 
 export const metadata: Metadata = { title: "Book a call" };
 
@@ -15,6 +16,7 @@ export default function BookPage() {
         title={`Video call with ${rep.name.split(" ")[0]}`}
         description="Pick a time that suits you. You'll get a confirmation email and reminders, and you can join right from your dashboard."
       />
+      <PreviewNotice>Demo data. Booking with your real advisor, confirmation emails and reminders connect in Phase 4.</PreviewNotice>
       <BookingPicker customerId={me.id} rep={{ id: rep.id, name: rep.name, title: rep.title, online: rep.online }} />
     </div>
   );

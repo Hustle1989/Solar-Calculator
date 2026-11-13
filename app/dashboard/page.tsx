@@ -1,146 +1,171 @@
 import Link from "next/link";
-import {
-  ArrowRightIcon,
-  CalendarDaysIcon,
-  CheckCircle2Icon,
-  ClockIcon,
-  HeadsetIcon,
-  MessageSquareIcon,
-  RadioIcon,
-  ReceiptIcon,
-  UploadIcon,
-} from "lucide-react";
+import { ArrowRightIcon, CalculatorIcon, CalendarDaysIcon, CheckCircle2Icon, HeadsetIcon, MessageSquareIcon, RadioIcon, ReceiptIcon, UploadIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { StageBadge, StageTracker } from "@/components/shared/stage";
-import { PageHeader, SectionTitle, UserAvatar } from "@/components/shared/ui-bits";
+import { PageHeader, SectionTitle, UserAvatar, EmptyState } from "@/components/shared/ui-bits";
 import { SystemSummary } from "@/components/shared/system-summary";
 import { StartCallButton } from "@/components/call/start-call-button";
 import { goldButton } from "@/components/shared/styles";
-import { formatDate, formatDateTime, formatTime, naira } from "@/lib/format";
-import { STAGES, stageIndex } from "@/lib/stages";
-import {
-  bookings,
-  demoCalculation,
-  demoStageEvents,
-  DEMO_CUSTOMER_ID,
-  getCustomer,
-  getRep,
-  quotes,
-  quoteTotals,
-} from "@/lib/mock-data";
+import { LiveProjectStatus, type CustomerStatusRow } from "@/components/customer/live-status";
+import { PendingCalcSaver } from "@/components/customer/pending-calc-saver";
+import { formatDate, naira } from "@/lib/format";
+import { STAGES, stageIndex, type Stage } from "@/lib/stages";
+import { requireViewer } from "@/lib/auth/viewer";
+import { getCustomerRecord } from "@/lib/data";
+import { live, loadLive } from "@/lib/realtime";
 
-function LiveDot() {
-  return (
-    <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
-      <span className="relative flex size-2">
-        <span className="absolute inline-flex size-full animate-ping rounded-full bg-emerald-400 opacity-60" />
-        <span className="relative inline-flex size-2 rounded-full bg-emerald-500" />
-      </span>
-      Live
-    </span>
+export default async function CustomerDashboard() {
+  const viewer = await requireViewer(["customer"], "/dashboard");
+  const [record, status] = await Promise.all([getCustomerRecord(viewer.userId), loadLive<CustomerStatusRow>(live.customerStatus(viewer.userId))]);
+  if (!record) return null;
+  const { profile, rep, calc, events } = record;
+  const first = profile.name.split(" ")[0];
+  const stage = profile.stage as Stage;
+
+  const calcCard = (
+    <Card>
+      <CardHeader>
+        <CardTitle>Your saved calculation</CardTitle>
+        <CardDescription>{calc ? `Saved ${formatDate(calc.created_at)} from the load calculator` : "Nothing saved yet"}</CardDescription>
+      </CardHeader>
+      <CardContent>
+        {calc ? (
+          <SystemSummary lines={calc.lines} backupHours={calc.backup_hours} summary={calc.result} />
+        ) : (
+          <EmptyState
+            icon={CalculatorIcon}
+            title="Size your system"
+            description="Use the load calculator to estimate the panels, batteries and inverter you need. It's saved here for your advisor."
+            action={
+              <Button asChild className={goldButton}>
+                <Link href="/#calculator">Open the calculator</Link>
+              </Button>
+            }
+          />
+        )}
+      </CardContent>
+    </Card>
   );
-}
 
-export default async function CustomerDashboard({ searchParams }: { searchParams: Promise<{ welcome?: string }> }) {
-  const { welcome } = await searchParams;
-  const me = getCustomer(DEMO_CUSTOMER_ID)!;
-  const first = me.name.split(" ")[0];
+  // ---------- just signed up: waiting for an advisor ----------
+  if (stage === "new") {
+    return (
+      <div className="mx-auto max-w-5xl space-y-6">
+        <PendingCalcSaver />
+        <PageHeader eyebrow="Welcome aboard" title={`Thanks for signing up, ${first}!`} description="Here's what happens next." />
+        <div className="dark relative overflow-hidden rounded-2xl bg-night p-6 text-foreground sm:p-10">
+          <div className="relative flex flex-col items-center text-center">
+            <span className="grid size-24 animate-ring-pulse place-items-center rounded-full border-2 border-gold/70 text-gold-text">
+              <HeadsetIcon className="size-10" strokeWidth={1.5} />
+            </span>
+            <p className="mt-6 inline-flex items-center gap-2 text-xs tracking-[0.25em] text-gold-text uppercase">
+              <RadioIcon className="size-3.5" /> Matching you with an expert
+            </p>
+            <h2 className="mt-2 font-display text-2xl font-extrabold uppercase sm:text-3xl">Assigning your solar advisor…</h2>
+            <p className="mt-3 max-w-lg text-muted-foreground">
+              Usually within 2 working hours. This page updates by itself the moment your advisor is assigned.
+            </p>
+          </div>
+        </div>
+        <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
+          {calcCard}
+          <Card>
+            <CardHeader>
+              <CardTitle>While you wait</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {[
+                { done: true, text: "Account created" },
+                { done: !!calc, text: "Calculation saved", href: calc ? undefined : "/#calculator" },
+                { done: false, text: "Upload photos of your roof and meter", href: "/dashboard/media" },
+                { done: false, text: "Meet your advisor on chat or video" },
+              ].map((s) => (
+                <div key={s.text} className="flex items-start gap-3 text-sm">
+                  <CheckCircle2Icon className={s.done ? "mt-0.5 size-4 text-emerald-500" : "mt-0.5 size-4 text-muted-foreground/40"} />
+                  {s.href && !s.done ? (
+                    <Link href={s.href} className="font-medium text-gold-text hover:underline">
+                      {s.text}
+                    </Link>
+                  ) : (
+                    <span className={s.done ? "text-muted-foreground line-through" : ""}>{s.text}</span>
+                  )}
+                </div>
+              ))}
+            </CardContent>
+          </Card>
+        </div>
+        <Card>
+          <CardContent className="pt-0">
+            <LiveProjectStatus userId={viewer.userId} sealedQuery={status.sealedQuery} initialData={status.initialData} variant="tracker-only" />
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
-  if (welcome) return <WaitingForAdvisor firstName={first} />;
-
-  const rep = getRep(me.repId)!;
-  const quote = quotes.find((q) => q.customerId === me.id)!;
-  const totals = quoteTotals(quote);
-  const nextCall = bookings.find((b) => b.customerId === me.id && b.status === "booked");
-  const stage = STAGES[stageIndex(me.stage)];
-
+  // ---------- assigned and beyond ----------
+  const hasQuote = stageIndex(stage) >= stageIndex("quote_sent");
   return (
     <div className="mx-auto max-w-6xl space-y-6">
+      <PendingCalcSaver />
       <PageHeader
         eyebrow="My solar project"
         title={`Welcome back, ${first}`}
-        description={`${me.propertyType} · ${me.address}, ${me.city}`}
+        description={[profile.property_type, profile.address, profile.city].filter(Boolean).join(" · ") || profile.email}
         actions={
-          <Button asChild className={goldButton}>
-            <Link href={`/dashboard/quotes/${quote.id}`}>
-              Review quote <ArrowRightIcon />
-            </Link>
-          </Button>
+          rep ? (
+            <Button asChild className={goldButton}>
+              <Link href="/dashboard/chat">
+                Message {rep.name.split(" ")[0]} <ArrowRightIcon />
+              </Link>
+            </Button>
+          ) : null
         }
       />
 
-      {/* live status */}
-      <Card className="gold-border overflow-visible">
-        <CardHeader>
-          <div className="flex flex-wrap items-center gap-3">
-            <CardTitle className="font-display text-lg">Project status</CardTitle>
-            <StageBadge stage={me.stage} />
-            <span className="ml-auto">
-              <LiveDot />
-            </span>
-          </div>
-          <CardDescription>{stage.description}</CardDescription>
-        </CardHeader>
-        <CardContent className="pt-2">
-          <StageTracker stage={me.stage} />
-        </CardContent>
-      </Card>
+      <LiveProjectStatus userId={viewer.userId} sealedQuery={status.sealedQuery} initialData={status.initialData} />
 
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_340px]">
         <div className="space-y-6">
-          {/* quote */}
           <Card>
             <CardHeader>
               <div className="flex items-center gap-2">
                 <ReceiptIcon className="size-4 text-gold-text" />
-                <CardTitle>Quote {quote.number}</CardTitle>
-                <span className="ml-auto rounded-full bg-gold-soft px-2.5 py-0.5 text-xs font-medium text-gold-text">Awaiting your approval</span>
+                <CardTitle>Your quote</CardTitle>
               </div>
               <CardDescription>
-                Sent by {rep.name} on {formatDate(quote.createdAt)} · valid until {formatDate(quote.validUntil)}
+                {hasQuote ? "Your advisor has sent your quote." : `${rep?.name ?? "Your advisor"} is reviewing your calculation and preparing your quote.`}
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="grid gap-3 sm:grid-cols-3">
-                <div className="rounded-xl bg-muted/50 p-4">
-                  <p className="text-xs text-muted-foreground uppercase">System total</p>
-                  <p className="mt-1 font-display text-xl font-bold">{naira(totals.total)}</p>
+              {calc && (
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="rounded-xl bg-muted/50 p-4">
+                    <p className="text-xs text-muted-foreground uppercase">Estimated system cost</p>
+                    <p className="mt-1 font-display text-xl font-bold">{naira(calc.result.totalKobo)}</p>
+                  </div>
+                  <div className="rounded-xl bg-gold-soft p-4 ring-1 ring-gold/30">
+                    <p className="text-xs text-gold-text uppercase">Estimated deposit</p>
+                    <p className="mt-1 font-display text-xl font-bold text-gold-text">{naira(calc.result.depositKobo)}</p>
+                  </div>
                 </div>
-                <div className="rounded-xl bg-gold-soft p-4 ring-1 ring-gold/30">
-                  <p className="text-xs text-gold-text uppercase">Deposit ({quote.depositPercent}%)</p>
-                  <p className="mt-1 font-display text-xl font-bold text-gold-text">{naira(totals.deposit)}</p>
-                </div>
-                <div className="rounded-xl bg-muted/50 p-4">
-                  <p className="text-xs text-muted-foreground uppercase">Balance after install</p>
-                  <p className="mt-1 font-display text-xl font-bold">{naira(totals.balance)}</p>
-                </div>
-              </div>
+              )}
               <div className="mt-4 flex flex-col gap-2 sm:flex-row">
-                <Button asChild className={goldButton}>
-                  <Link href={`/dashboard/quotes/${quote.id}`}>Accept &amp; pay deposit</Link>
-                </Button>
+                {hasQuote && (
+                  <Button asChild className={goldButton}>
+                    <Link href="/dashboard/quotes/q-1042">View quote (preview)</Link>
+                  </Button>
+                )}
                 <Button asChild variant="outline">
                   <Link href="/dashboard/chat">Ask a question</Link>
                 </Button>
               </div>
             </CardContent>
           </Card>
-
-          {/* calculation */}
-          <Card>
-            <CardHeader>
-              <CardTitle>Your saved calculation</CardTitle>
-              <CardDescription>Saved {formatDate(demoCalculation.createdAt)} from the load calculator</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <SystemSummary lines={demoCalculation.lines} backupHours={demoCalculation.backupHours} />
-            </CardContent>
-          </Card>
+          {calcCard}
         </div>
 
         <div className="space-y-6">
-          {/* advisor */}
           <Card>
             <CardHeader>
               <CardDescription className="flex items-center gap-1.5">
@@ -148,68 +173,56 @@ export default async function CustomerDashboard({ searchParams }: { searchParams
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="flex items-center gap-3">
-                <UserAvatar name={rep.name} online={rep.online} size="lg" gold />
-                <div>
-                  <p className="font-semibold">{rep.name}</p>
-                  <p className="text-xs text-muted-foreground">{rep.title} · usually replies in under an hour</p>
-                </div>
-              </div>
-              <div className="mt-4 grid grid-cols-2 gap-2">
-                <Button asChild variant="outline">
-                  <Link href="/dashboard/chat">
-                    <MessageSquareIcon /> Message
-                  </Link>
-                </Button>
-                <StartCallButton peer={rep.name} />
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* next call */}
-          <Card>
-            <CardHeader>
-              <CardDescription className="flex items-center gap-1.5">
-                <CalendarDaysIcon className="size-3.5" /> Next call
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              {nextCall ? (
+              {rep ? (
                 <>
-                  <p className="font-display text-lg font-bold">{formatDateTime(nextCall.startsAt)}</p>
-                  <p className="text-sm text-muted-foreground">
-                    30 min · {nextCall.topic}
-                  </p>
+                  <div className="flex items-center gap-3">
+                    <UserAvatar name={rep.name} size="lg" gold />
+                    <div>
+                      <p className="font-semibold">{rep.name}</p>
+                      <p className="text-xs text-muted-foreground">{rep.title ?? "Solar Advisor"}</p>
+                    </div>
+                  </div>
                   <div className="mt-4 grid grid-cols-2 gap-2">
-                    <Button disabled variant="secondary" title="Opens 10 minutes before the call">
-                      <ClockIcon /> Join at {formatTime(new Date(nextCall.startsAt.getTime() - 10 * 60_000))}
-                    </Button>
                     <Button asChild variant="outline">
-                      <Link href="/dashboard/book">Reschedule</Link>
+                      <Link href="/dashboard/chat">
+                        <MessageSquareIcon /> Message
+                      </Link>
                     </Button>
+                    <StartCallButton peer={rep.name} />
                   </div>
                 </>
               ) : (
-                <Button asChild variant="outline" className="w-full">
-                  <Link href="/dashboard/book">Book a call</Link>
-                </Button>
+                <p className="text-sm text-muted-foreground">We&apos;re assigning your advisor.</p>
               )}
             </CardContent>
           </Card>
 
-          {/* activity */}
+          <Card>
+            <CardHeader>
+              <CardDescription className="flex items-center gap-1.5">
+                <CalendarDaysIcon className="size-3.5" /> Calls
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <p className="text-sm text-muted-foreground">Book a 30-minute video call with your advisor.</p>
+              <Button asChild variant="outline" className="w-full">
+                <Link href="/dashboard/book">Book a call</Link>
+              </Button>
+            </CardContent>
+          </Card>
+
           <Card>
             <CardHeader>
               <SectionTitle>Timeline</SectionTitle>
             </CardHeader>
             <CardContent>
               <ol className="relative space-y-4 border-l pl-5">
-                {[...demoStageEvents].reverse().map((e) => (
-                  <li key={e.stage} className="relative">
+                {[...events].reverse().map((e) => (
+                  <li key={e.id} className="relative">
                     <span className="absolute top-1 -left-[25px] grid size-3.5 place-items-center rounded-full bg-gold-gradient ring-4 ring-card" />
-                    <p className="text-sm font-medium">{STAGES[stageIndex(e.stage)].label}</p>
+                    <p className="text-sm font-medium">{STAGES[stageIndex(e.to_stage)].label}</p>
                     <p className="text-xs text-muted-foreground">
-                      {e.note ?? `by ${e.by}`} · {formatDate(e.at, { day: "numeric", month: "short" })}
+                      {e.note ?? (e.changed_by ? `by ${e.changed_by}` : "")} · {formatDate(e.created_at, { day: "numeric", month: "short" })}
                     </p>
                   </li>
                 ))}
@@ -218,75 +231,6 @@ export default async function CustomerDashboard({ searchParams }: { searchParams
           </Card>
         </div>
       </div>
-    </div>
-  );
-}
-
-function WaitingForAdvisor({ firstName }: { firstName: string }) {
-  return (
-    <div className="mx-auto max-w-5xl space-y-6">
-      <PageHeader eyebrow="Welcome aboard" title={`Thanks for signing up, ${firstName}!`} description="Your calculation is saved. Here's what happens next." />
-
-      <div className="dark relative overflow-hidden rounded-2xl bg-night p-6 text-foreground sm:p-10">
-        <div className="relative flex flex-col items-center text-center">
-          <span className="grid size-24 animate-ring-pulse place-items-center rounded-full border-2 border-gold/70 text-gold-text">
-            <HeadsetIcon className="size-10" strokeWidth={1.5} />
-          </span>
-          <p className="mt-6 inline-flex items-center gap-2 text-xs tracking-[0.25em] text-gold-text uppercase">
-            <RadioIcon className="size-3.5" /> Matching you with an expert
-          </p>
-          <h2 className="mt-2 font-display text-2xl font-extrabold uppercase sm:text-3xl">Assigning your solar advisor…</h2>
-          <p className="mt-3 max-w-lg text-muted-foreground">
-            Usually within 2 working hours. This page updates by itself, and we&apos;ll email you the moment your
-            advisor is assigned.
-          </p>
-          <div className="mt-6">
-            <LiveDot />
-          </div>
-        </div>
-      </div>
-
-      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
-        <Card>
-          <CardHeader>
-            <CardTitle>Your saved calculation</CardTitle>
-            <CardDescription>Your advisor will start from this.</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <SystemSummary lines={demoCalculation.lines} backupHours={demoCalculation.backupHours} />
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader>
-            <CardTitle>While you wait</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            {[
-              { done: true, text: "Calculation saved" },
-              { done: false, text: "Upload photos of your roof and meter", href: "/dashboard/media", icon: UploadIcon },
-              { done: false, text: "Meet your advisor on chat or video" },
-              { done: false, text: "Review your quote" },
-            ].map((s) => (
-              <div key={s.text} className="flex items-start gap-3 text-sm">
-                <CheckCircle2Icon className={s.done ? "mt-0.5 size-4 text-emerald-500" : "mt-0.5 size-4 text-muted-foreground/40"} />
-                {s.href ? (
-                  <Link href={s.href} className="font-medium text-gold-text hover:underline">
-                    {s.text}
-                  </Link>
-                ) : (
-                  <span className={s.done ? "text-muted-foreground line-through" : ""}>{s.text}</span>
-                )}
-              </div>
-            ))}
-          </CardContent>
-        </Card>
-      </div>
-
-      <Card>
-        <CardContent className="pt-0">
-          <StageTracker stage="new" />
-        </CardContent>
-      </Card>
     </div>
   );
 }

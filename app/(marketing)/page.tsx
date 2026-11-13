@@ -19,7 +19,10 @@ import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/
 import { Calculator } from "@/components/calculator/calculator";
 import { HeroIllustration } from "@/components/marketing/hero-illustration";
 import { goldButton, eyebrow } from "@/components/shared/styles";
-import { appliances, equipment, settings } from "@/lib/mock-data";
+import { getCatalog } from "@/lib/data";
+
+// Prices come from the database; admin price changes revalidate this page immediately.
+export const revalidate = 300;
 
 const steps = [
   { icon: CalculatorIcon, title: "Calculate your load", body: "List the appliances you need during an outage. We size the inverter, panels and batteries instantly." },
@@ -49,7 +52,9 @@ const faqs = [
   { q: "Do I need to be connected to the grid?", a: "No. Our hybrid systems work with or without grid power. During outages, your batteries take over automatically." },
 ];
 
-export default function HomePage() {
+export default async function HomePage() {
+  const { settings, equipment, appliances: allAppliances } = await getCatalog();
+  const appliances = allAppliances.filter((a) => a.active);
   return (
     <>
       {/* HERO */}

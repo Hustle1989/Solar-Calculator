@@ -1,24 +1,28 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { BanknoteIcon, CalendarCheckIcon, InboxIcon, ReceiptIcon, UserPlusIcon, UsersIcon, WalletIcon } from "lucide-react";
+import { BanknoteIcon, CalendarCheckIcon, InboxIcon, ReceiptIcon, UserPlusIcon, UsersIcon, WrenchIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { PageHeader, SectionTitle, StatCard, UserAvatar } from "@/components/shared/ui-bits";
-import { UnassignedQueue } from "@/components/admin/unassigned-queue";
-import { nairaCompact, timeAgo } from "@/lib/format";
-import { STAGES } from "@/lib/stages";
-import { activity, customers, depositsCollectedKobo, reps } from "@/lib/mock-data";
+import { UnassignedQueue, type QueueRow } from "@/components/admin/unassigned-queue";
+import { formatNumber, timeAgo } from "@/lib/format";
+import { STAGES, stageLabel, type Stage } from "@/lib/stages";
+import { requireViewer } from "@/lib/auth/viewer";
+import { getAdminOverview, listReps } from "@/lib/data";
+import { live, loadLive } from "@/lib/realtime";
 
 export const metadata: Metadata = { title: "Admin overview" };
 
-const activityIcon = { signup: UserPlusIcon, booking: CalendarCheckIcon, payment: BanknoteIcon, quote: ReceiptIcon };
+const eventIcon: Partial<Record<Stage, typeof UserPlusIcon>> = { new: UserPlusIcon, assigned: UsersIcon, quote_sent: ReceiptIcon, deposit_paid: BanknoteIcon, site_survey: CalendarCheckIcon, installation: WrenchIcon };
 
-export default function AdminHome() {
-  const unassigned = customers.filter((c) => c.stage === "new");
-  const active = customers.filter((c) => !["new", "completed"].includes(c.stage));
-  const byStage = STAGES.map((s) => ({ ...s, count: customers.filter((c) => c.stage === s.id).length }));
-  const max = Math.max(...byStage.map((s) => s.count));
-  const team = reps.filter((r) => r.status === "active").map((r) => ({ r, n: customers.filter((c) => c.repId === r.id && c.stage !== "completed").length }));
+export default async function AdminHome() {
+  const viewer = await requireViewer(["admin"], "/admin");
+  const [overview, reps, queue] = await Promise.all([getAdminOverview(), listReps(), loadLive<QueueRow>(live.adminQueue())]);
+  const n = (s: Stage) => overview.byStage.get(s) ?? 0;
+  const byStage = STAGES.map((s) => ({ ...s, count: n(s.id) }));
+  const max = Math.max(1, ...byStage.map((s) => s.count));
+  const activeReps = reps.filter((r) => r.status === "active");
+  const active = byStage.filter((s) => !["new", "completed"].includes(s.id)).reduce((t, s) => t + s.count, 0);
 
   return (
     <div className="mx-auto max-w-7xl space-y-8">
@@ -36,15 +40,15 @@ export default function AdminHome() {
       />
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <StatCard label="New sign-ups (7 days)" value={14} hint="+27% vs last week" icon={UserPlusIcon} />
-        <StatCard label="Unassigned" value={unassigned.length} hint="Oldest waiting 5h" icon={InboxIcon} />
-        <StatCard label="Active projects" value={active.length} hint={`${customers.filter((c) => c.stage === "completed").length} completed`} icon={UsersIcon} />
-        <StatCard label="Deposits collected" value={nairaCompact(depositsCollectedKobo)} hint="This month" icon={WalletIcon} highlight />
+        <StatCard label="New sign-ups (7 days)" value={formatNumber(overview.signupsThisWeek)} icon={UserPlusIcon} />
+        <StatCard label="Unassigned" value={n("new")} hint="Waiting for an advisor" icon={InboxIcon} />
+        <StatCard label="Active projects" value={active} hint={`${n("completed")} completed`} icon={UsersIcon} />
+        <StatCard label="Awaiting deposit" value={n("quote_sent")} hint="Payments connect in Phase 3" icon={BanknoteIcon} highlight />
       </div>
 
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
         <div className="space-y-6">
-          <UnassignedQueue initial={unassigned} />
+          <UnassignedQueue userId={viewer.userId} sealedQuery={queue.sealedQuery} initialData={queue.initialData} reps={activeReps.map((r) => ({ id: r.id, name: r.name, open: r.open }))} />
 
           <section className="rounded-2xl border bg-card p-5">
             <SectionTitle>Pipeline by stage</SectionTitle>
@@ -73,35 +77,44 @@ export default function AdminHome() {
             >
               Advisor workload
             </SectionTitle>
-            <ul className="space-y-4">
-              {team.map(({ r, n }) => (
-                <li key={r.id} className="flex items-center gap-3">
-                  <UserAvatar name={r.name} online={r.online} />
-                  <div className="min-w-0 flex-1">
-                    <div className="flex justify-between text-sm">
-                      <span className="truncate font-medium">{r.name}</span>
-                      <span className="text-muted-foreground tabular-nums">{n} open</span>
+            {activeReps.length === 0 ? (
+              <p className="text-sm text-muted-foreground">No advisors yet.</p>
+            ) : (
+              <ul className="space-y-4">
+                {activeReps.map((r) => (
+                  <li key={r.id} className="flex items-center gap-3">
+                    <UserAvatar name={r.name} />
+                    <div className="min-w-0 flex-1">
+                      <div className="flex justify-between text-sm">
+                        <span className="truncate font-medium">{r.name}</span>
+                        <span className="text-muted-foreground tabular-nums">{r.open} open</span>
+                      </div>
+                      <Progress value={Math.min(100, r.open * 20)} className="mt-1.5 h-1.5" />
                     </div>
-                    <Progress value={Math.min(100, n * 20)} className="mt-1.5 h-1.5" />
-                  </div>
-                </li>
-              ))}
-            </ul>
+                  </li>
+                ))}
+              </ul>
+            )}
           </section>
 
           <section className="rounded-2xl border bg-card p-5">
             <SectionTitle>Recent activity</SectionTitle>
             <ul className="space-y-4">
-              {activity.map((a) => {
-                const Icon = activityIcon[a.kind];
+              {overview.activity.map((a) => {
+                const Icon = eventIcon[a.to] ?? UsersIcon;
                 return (
                   <li key={a.id} className="flex gap-3 text-sm">
                     <span className="grid size-8 shrink-0 place-items-center rounded-full bg-gold-soft text-gold-text">
                       <Icon className="size-4" />
                     </span>
                     <div>
-                      <p>{a.text}</p>
-                      <p className="text-xs text-muted-foreground">{timeAgo(a.at)}</p>
+                      <p>
+                        <span className="font-medium">{a.customer}</span>: {a.to === "new" ? "signed up" : a.note ?? `moved to ${stageLabel(a.to)}`}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {timeAgo(a.at)}
+                        {a.by && a.to !== "new" ? ` · by ${a.by}` : ""}
+                      </p>
                     </div>
                   </li>
                 );

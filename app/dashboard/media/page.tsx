@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { PageHeader, SectionTitle } from "@/components/shared/ui-bits";
 import { MediaManager } from "@/components/media/media-manager";
 import { DEMO_CUSTOMER_ID, media } from "@/lib/mock-data";
+import { PreviewNotice } from "@/components/shared/preview-notice";
 
 export const metadata: Metadata = { title: "Site media" };
 
@@ -15,6 +16,7 @@ export default function MediaPage() {
         title="Photos & videos"
         description="Clear photos of your roof, meter and distribution board help your advisor plan your system without an extra site visit."
       />
+      <PreviewNotice>Demo data. Uploads are stored securely with ImageKit in Phase 4.</PreviewNotice>
       <section>
         <SectionTitle>Your uploads</SectionTitle>
         <MediaManager

@@ -11,24 +11,46 @@ import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { StageTracker } from "@/components/shared/stage";
 import { goldButton } from "@/components/shared/styles";
+import { advanceStage } from "@/lib/actions";
+import { useRouter } from "next/navigation";
 
 type Event = { stage: Stage; at: Date; by: string; note?: string };
 
-export function StageControl({ initialStage, events: initialEvents, repName }: { initialStage: Stage; events: Event[]; repName: string }) {
+export function StageControl({
+  customerId,
+  initialStage,
+  events: initialEvents,
+  repName,
+}: {
+  customerId: string;
+  initialStage: Stage;
+  events: Event[];
+  repName: string;
+}) {
+  const router = useRouter();
   const [stage, setStage] = useState(initialStage);
   const [events, setEvents] = useState(initialEvents);
   const [open, setOpen] = useState(false);
   const [note, setNote] = useState("");
+  const [busy, setBusy] = useState(false);
   const [balancePaid, setBalancePaid] = useState(false);
   const next = REP_NEXT_STAGE[stage];
 
-  const advance = () => {
+  const advance = async () => {
     if (!next) return;
+    setBusy(true);
+    const res = await advanceStage({ customerId, to: next, note: note || undefined });
+    setBusy(false);
+    if (!res.ok) {
+      toast.error(res.error);
+      return;
+    }
     setStage(next);
     setEvents((e) => [...e, { stage: next, at: new Date(), by: repName, note: note || undefined }]);
     setOpen(false);
     setNote("");
-    toast.success(`Moved to ${stageLabel(next)}`, { description: "The customer's dashboard updated live and they've been emailed." });
+    toast.success(`Moved to ${stageLabel(next)}`, { description: "The customer's dashboard updated live." });
+    router.refresh();
   };
 
   return (
@@ -60,7 +82,7 @@ export function StageControl({ initialStage, events: initialEvents, repName }: {
               variant="outline"
               onClick={() => {
                 setBalancePaid(true);
-                toast.success("Balance marked as paid");
+                toast.success("Balance marked as paid (preview)", { description: "Saved with payments in Phase 3." });
               }}
             >
               <BanknoteIcon /> Mark balance paid
@@ -98,7 +120,7 @@ export function StageControl({ initialStage, events: initialEvents, repName }: {
             <Button variant="outline" onClick={() => setOpen(false)}>
               Cancel
             </Button>
-            <Button className={goldButton} onClick={advance}>
+            <Button className={goldButton} onClick={advance} disabled={busy}>
               Confirm
             </Button>
           </DialogFooter>

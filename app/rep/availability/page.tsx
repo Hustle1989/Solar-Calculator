@@ -5,6 +5,7 @@ import { AvailabilityEditor } from "@/components/rep/availability-editor";
 import { StartCallButton } from "@/components/call/start-call-button";
 import { formatDay, formatTime } from "@/lib/format";
 import { availability, bookings, DEMO_REP_ID, getCustomer } from "@/lib/mock-data";
+import { PreviewNotice } from "@/components/shared/preview-notice";
 
 export const metadata: Metadata = { title: "Availability" };
 
@@ -16,6 +17,7 @@ export default function AvailabilityPage() {
   return (
     <div className="mx-auto max-w-6xl space-y-6">
       <PageHeader eyebrow="Availability" title="When can customers book you?" description="Customers can book 30-minute video calls inside these hours, at least 2 hours ahead and up to 14 days out." />
+      <PreviewNotice>Demo data. Availability and booked calls are saved in Phase 4.</PreviewNotice>
       <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_340px]">
         <AvailabilityEditor initial={availability} />
         <section>

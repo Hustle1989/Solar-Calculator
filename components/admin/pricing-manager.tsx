@@ -16,6 +16,11 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { goldButton } from "@/components/shared/styles";
+import { saveAppliances, saveEquipment, saveSettings, setDefaultEquipment, type ActionResult } from "@/lib/actions";
+import { useRouter } from "next/navigation";
+
+const report = (res: ActionResult, success: string) => (res.ok ? toast.success(success) : toast.error(res.error));
+const toInput = (e: Equipment) => ({ id: e.id, kind: e.kind, name: e.name, spec: e.spec, priceKobo: e.priceKobo, isDefault: e.isDefault, active: e.active });
 
 const KIND: Record<EquipmentKind, { label: string; unit: string; icon: typeof SunIcon }> = {
   panel: { label: "Solar panels", unit: "W", icon: SunIcon },
@@ -38,8 +43,18 @@ export function PricingManager({
   const [settings, setSettings] = useState(initialSettings);
   const [editing, setEditing] = useState<Equipment | null>(null);
 
+  const router = useRouter();
+  const [saving, setSaving] = useState(false);
   const sample = sizeSystem(loadPresets.residential.lines, loadPresets.residential.backupHours, settings, equipment);
-  const updateEq = (id: string, patch: Partial<Equipment>) => setEquipment((es) => es.map((e) => (e.id === id ? { ...e, ...patch } : e)));
+  const updateEq = async (id: string, patch: Partial<Equipment>) => {
+    const item = equipment.find((e) => e.id === id);
+    if (!item) return;
+    setEquipment((es) => es.map((e) => (e.id === id ? { ...e, ...patch } : e)));
+    const res = await saveEquipment(toInput({ ...item, ...patch }));
+    report(res, patch.active === false ? `${item.name} hidden from the calculator` : `${item.name} saved`);
+    if (!res.ok) setEquipment((es) => es.map((e) => (e.id === id ? item : e)));
+    router.refresh();
+  };
 
   return (
     <Tabs defaultValue="equipment" className="gap-6">
@@ -100,9 +115,11 @@ export function PricingManager({
                             variant="ghost"
                             size="icon-sm"
                             aria-label={e.isDefault ? "Default" : "Make default"}
-                            onClick={() => {
-                              setEquipment((es) => es.map((x) => (x.kind === k ? { ...x, isDefault: x.id === e.id } : x)));
-                              toast.success(`${e.name} is now the calculator default`);
+                            onClick={async () => {
+                              const res = await setDefaultEquipment({ id: e.id });
+                              if (res.ok) setEquipment((es) => es.map((x) => (x.kind === k ? { ...x, isDefault: x.id === e.id, active: x.id === e.id ? true : x.active } : x)));
+                              report(res, `${e.name} is now the calculator default`);
+                              router.refresh();
                             }}
                           >
                             <StarIcon className={cn(e.isDefault ? "fill-gold text-gold" : "text-muted-foreground")} />
@@ -191,7 +208,17 @@ export function PricingManager({
             </TableBody>
           </Table>
           <div className="flex justify-end border-t p-4">
-            <Button className={goldButton} onClick={() => toast.success("Appliance catalog saved")}>
+            <Button
+              className={goldButton}
+              disabled={saving}
+              onClick={async () => {
+                setSaving(true);
+                const res = await saveAppliances(appliances.map((a) => ({ id: a.id, name: a.name, watts: Math.round(a.watts), hours: a.hours, category: a.category })));
+                setSaving(false);
+                report(res, "Appliance catalog saved");
+                router.refresh();
+              }}
+            >
               Save changes
             </Button>
           </div>
@@ -219,7 +246,17 @@ export function PricingManager({
               <Button variant="ghost" onClick={() => setSettings(initialSettings)}>
                 Reset
               </Button>
-              <Button className={goldButton} onClick={() => toast.success("Settings saved", { description: "The calculator uses the new values immediately." })}>
+              <Button
+                className={goldButton}
+                disabled={saving}
+                onClick={async () => {
+                  setSaving(true);
+                  const res = await saveSettings(settings);
+                  setSaving(false);
+                  report(res, "Settings saved. The calculator uses them now.");
+                  router.refresh();
+                }}
+              >
                 Save settings
               </Button>
             </div>
@@ -245,10 +282,13 @@ export function PricingManager({
       <EquipmentDialog
         item={editing}
         onClose={() => setEditing(null)}
-        onSave={(e) => {
+        onSave={async (e) => {
+          const res = await saveEquipment(toInput(e));
+          report(res, `${e.name} saved`);
+          if (!res.ok) return;
           setEquipment((es) => (es.some((x) => x.id === e.id) ? es.map((x) => (x.id === e.id ? e : x)) : [...es, e]));
-          toast.success(`${e.name} saved`);
           setEditing(null);
+          router.refresh();
         }}
       />
     </Tabs>

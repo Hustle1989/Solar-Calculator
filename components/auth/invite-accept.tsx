@@ -21,6 +21,7 @@ export function InviteAccept({ email, name }: { email: string; name: string }) {
 
   return (
     <form
+      method="post"
       className="mt-6 space-y-4"
       onSubmit={(e) => {
         e.preventDefault();

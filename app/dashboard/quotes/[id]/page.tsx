@@ -7,6 +7,7 @@ import { PageHeader } from "@/components/shared/ui-bits";
 import { QuoteDocument } from "@/components/quotes/quote-document";
 import { QuoteActions } from "@/components/quotes/quote-actions";
 import { getCustomer, getRep, quotes, quoteTotals } from "@/lib/mock-data";
+import { PreviewNotice } from "@/components/shared/preview-notice";
 
 export const metadata: Metadata = { title: "Your quote" };
 
@@ -26,6 +27,7 @@ export default async function QuotePage({ params }: { params: Promise<{ id: stri
         </Link>
       </Button>
       <PageHeader eyebrow="Quote" title={`Your solar system quote`} description={`Prepared by ${rep.name}. Review it, ask questions, then accept to book your installation.`} />
+      <PreviewNotice>Demo quote. Real quotes and Paystack deposits connect in Phase 3. No payment is taken here.</PreviewNotice>
       <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_340px]">
         <QuoteDocument quote={quote} customer={customer} rep={rep} />
         <div className="space-y-4 lg:sticky lg:top-24">

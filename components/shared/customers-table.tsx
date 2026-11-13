@@ -6,8 +6,9 @@ import { useRouter } from "next/navigation";
 import { ChevronRightIcon, MessageSquareIcon, MoreHorizontalIcon, SearchIcon, UsersIcon } from "lucide-react";
 import { toast } from "sonner";
 import { formatDate, naira, timeAgo } from "@/lib/format";
-import { getRep, type Customer } from "@/lib/mock-data";
+import type { Customer } from "@/lib/mock-data";
 import type { Stage } from "@/lib/stages";
+import { assignAdvisor, setAccountActive } from "@/lib/actions";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -21,7 +22,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { StageBadge } from "@/components/shared/stage";
 import { EmptyState, UserAvatar } from "@/components/shared/ui-bits";
-import { AssignDialog } from "@/components/admin/assign-dialog";
+import { AssignDialog, type RepOption } from "@/components/admin/assign-dialog";
 
 const FILTERS: Record<string, { label: string; stages: Stage[] }> = {
   all: { label: "All", stages: [] },
@@ -32,9 +33,16 @@ const FILTERS: Record<string, { label: string; stages: Stage[] }> = {
   done: { label: "Completed", stages: ["completed"] },
 };
 
-export function CustomersTable({ rows: initial, admin = false }: { rows: Customer[]; admin?: boolean }) {
+export function CustomersTable({ rows: initial, admin = false, reps = [] }: { rows: Customer[]; admin?: boolean; reps?: RepOption[] }) {
   const router = useRouter();
   const [rows, setRows] = useState(initial);
+  // Take fresh rows whenever the server re-renders (after an action or router.refresh()).
+  const [prevInitial, setPrevInitial] = useState(initial);
+  if (initial !== prevInitial) {
+    setPrevInitial(initial);
+    setRows(initial);
+  }
+  const repName = (id: string | null) => reps.find((r) => r.id === id)?.name;
   const [q, setQ] = useState("");
   const [filter, setFilter] = useState("all");
   const [assigning, setAssigning] = useState<Customer | null>(null);
@@ -86,7 +94,7 @@ export function CustomersTable({ rows: initial, admin = false }: { rows: Custome
           </TableHeader>
           <TableBody>
             {visible.map((c) => {
-              const rep = getRep(c.repId);
+              const rep = c.repId ? { name: repName(c.repId) ?? "Advisor" } : null;
               return (
                 <TableRow key={c.id} className="cursor-pointer" onClick={() => router.push(`/rep/customers/${c.id}`)}>
                   <TableCell className="pl-4">
@@ -150,7 +158,16 @@ export function CustomersTable({ rows: initial, admin = false }: { rows: Custome
                           <>
                             <DropdownMenuSeparator />
                             <DropdownMenuItem onSelect={() => setAssigning(c)}>{c.repId ? "Reassign advisor" : "Assign advisor"}</DropdownMenuItem>
-                            <DropdownMenuItem variant="destructive" onSelect={() => toast("Account deactivated", { description: `${c.name} can no longer sign in. Their history is kept.` })}>
+                            <DropdownMenuItem
+                              variant="destructive"
+                              onSelect={async () => {
+                                const res = await setAccountActive({ userId: c.id, active: false });
+                                if (res.ok) {
+                                  toast("Account deactivated", { description: `${c.name} can no longer use the app. Their history is kept.` });
+                                  router.refresh();
+                                } else toast.error(res.error);
+                              }}
+                            >
                               Deactivate account
                             </DropdownMenuItem>
                           </>
@@ -171,10 +188,17 @@ export function CustomersTable({ rows: initial, admin = false }: { rows: Custome
           onOpenChange={(o) => !o && setAssigning(null)}
           customerName={assigning.name}
           currentRepId={assigning.repId}
-          onAssign={(repId) => {
+          reps={reps}
+          onAssign={async (repId) => {
+            const res = await assignAdvisor({ customerId: assigning.id, repId });
+            if (!res.ok) {
+              toast.error(res.error);
+              return;
+            }
             setRows((rs) => rs.map((r) => (r.id === assigning.id ? { ...r, repId, stage: r.stage === "new" ? "assigned" : r.stage } : r)));
-            toast.success(`${assigning.name} assigned to ${getRep(repId)?.name}`, { description: "Both have been emailed and their chat is open." });
+            toast.success(`${assigning.name} assigned to ${repName(repId)}`, { description: "Their dashboard updated live." });
             setAssigning(null);
+            router.refresh();
           }}
         />
       )}
